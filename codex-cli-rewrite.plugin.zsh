@@ -2,27 +2,28 @@
 # Rewrites natural-language shell intent in the current command buffer
 # into a concrete shell command via `codex exec`.
 
+typeset -g CODEX_CLI_REWRITE_RESULT_FILE
+
 : "${CODEX_CLI_REWRITE_KEY:=^I}"
 : "${CODEX_CLI_REWRITE_MODEL:=}"
+: "${CODEX_CLI_REWRITE_RESULT_FILE:=/tmp/zsh_codex_cli_rewrite_result}"
 
-_codex_cli_rewrite_widget() {
+_codex_cli_rewrite_trim() {
+  : "${1#"${1%%[![:space:]]*}"}"
+  : "${_%"${_##*[![:space:]]}"}"
+  printf '%s\n' "$_"
+}
+
+_codex_cli_rewrite_generate() {
   emulate -L zsh
   setopt pipefail
 
-  if ! command -v codex >/dev/null 2>&1; then
-    zle -M "codex-cli-rewrite: 'codex' command not found"
-    return 1
-  fi
+  local user_input="$1"
+  local prompt tmp_out tmp_err response command
+  local -a model_args
 
-  local user_input="$BUFFER"
-  if [[ -z "${user_input//[[:space:]]/}" ]]; then
-    zle -M "codex-cli-rewrite: command line is empty"
-    return 0
-  fi
-
-  local tmp_out tmp_err prompt model_args response command
-  tmp_out="$(mktemp "${TMPDIR:-/tmp}/codex-cli-rewrite.XXXXXX.out")" || return 1
-  tmp_err="$(mktemp "${TMPDIR:-/tmp}/codex-cli-rewrite.XXXXXX.err")" || {
+  tmp_out="$(mktemp "${TMPDIR:-/tmp}/codex-cli-rewrite.out.XXXXXX")" || return 1
+  tmp_err="$(mktemp "${TMPDIR:-/tmp}/codex-cli-rewrite.err.XXXXXX")" || {
     rm -f -- "$tmp_out"
     return 1
   }
@@ -49,7 +50,6 @@ PROMPT
     "${model_args[@]}" \
     -o "$tmp_out" \
     - >"$tmp_err" 2>&1; then
-    zle -M "codex-cli-rewrite: codex exec failed (run 'codex login')"
     rm -f -- "$tmp_out" "$tmp_err"
     return 1
   fi
@@ -60,23 +60,75 @@ PROMPT
   response="${response//$'\r'/}"
   response="${response//\`\`\`/}"
   response="${response//$'\n'/ }"
-  response="${response##[[:space:]]#}"
-  response="${response%%[[:space:]]#}"
+  response="$(_codex_cli_rewrite_trim "$response")"
 
   command="$response"
   command="${command#\`}"
   command="${command%\`}"
 
   if [[ -z "$command" ]]; then
-    zle -M "codex-cli-rewrite: empty response"
     return 1
   fi
 
-  BUFFER="$command"
-  CURSOR=${#BUFFER}
-  zle -M "codex-cli-rewrite: rewritten"
-  zle redisplay
+  print -r -- "$command"
 }
 
-zle -N codex-cli-rewrite _codex_cli_rewrite_widget
+_spinner() {
+  local pid=$1
+  local delay=0.1
+  local spin='⣾⣽⣻⢿⡿⣟⣯⣷'
+
+  cleanup() {
+    kill "$pid" >/dev/null 2>&1
+    tput cnorm >/dev/null 2>&1
+  }
+  trap cleanup SIGINT
+
+  local i=0
+  tput civis >/dev/null 2>&1
+  while kill -0 "$pid" 2>/dev/null; do
+    i=$(((i + 1) % ${#spin}))
+    printf "  %s" "${spin:$i:1}" >&2
+    sleep "$delay"
+    printf "\b\b\b" >&2
+  done
+  printf "   \b\b\b" >&2
+  tput cnorm >/dev/null 2>&1
+  trap - SIGINT
+}
+
+_codex_cli_rewrite_spinner() {
+  read -r < <(
+    _codex_cli_rewrite_generate "$@" >|"$CODEX_CLI_REWRITE_RESULT_FILE" &
+    echo $!
+  )
+  _spinner "$REPLY" >&2
+  cat "$CODEX_CLI_REWRITE_RESULT_FILE"
+}
+
+_prompt_msg() {
+  printf "\n%s\n\n" "$@"
+  zle reset-prompt
+}
+
+codex_cli_rewrite_widget() {
+  [ -z "$BUFFER" ] && return
+  zle end-of-line
+
+  if ! command -v codex >/dev/null 2>&1; then
+    _prompt_msg "codex-cli-rewrite: 'codex' command not found"
+    return 1
+  fi
+
+  local result
+  result="$(_codex_cli_rewrite_spinner "$BUFFER")"
+
+  [ -z "$result" ] && _prompt_msg "codex-cli-rewrite: rewrite failed (run 'codex login')" && return
+
+  zle reset-prompt
+  BUFFER="$result"
+  CURSOR=${#BUFFER}
+}
+
+zle -N codex-cli-rewrite codex_cli_rewrite_widget
 bindkey "$CODEX_CLI_REWRITE_KEY" codex-cli-rewrite
