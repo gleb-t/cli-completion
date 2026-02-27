@@ -1,6 +1,8 @@
 # oh-my-zsh plugin: codex-cli-rewrite
 # Rewrites natural-language shell intent in the current command buffer
 # into a concrete shell command via `codex exec`.
+# Spinner/widget flow adapted from:
+# https://github.com/loiccoyle/zsh-github-copilot
 
 typeset -g CODEX_CLI_REWRITE_RESULT_FILE
 
