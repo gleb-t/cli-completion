@@ -6,7 +6,6 @@
 
 typeset -g CODEX_CLI_REWRITE_RESULT_FILE
 
-: "${CODEX_CLI_REWRITE_KEY:=^I}"
 : "${CODEX_CLI_REWRITE_MODEL:=}"
 : "${CODEX_CLI_REWRITE_RESULT_FILE:=/tmp/zsh_codex_cli_rewrite_result}"
 
@@ -133,4 +132,14 @@ codex_cli_rewrite_widget() {
 }
 
 zle -N codex-cli-rewrite codex_cli_rewrite_widget
-bindkey "$CODEX_CLI_REWRITE_KEY" codex-cli-rewrite
+
+# Optional helper: bind the widget to a key sequence explicitly from ~/.zshrc
+# Example: codex_cli_rewrite_bind '^[r'   # Alt-r
+codex_cli_rewrite_bind() {
+  local keyseq="$1"
+  if [[ -z "$keyseq" ]]; then
+    echo "usage: codex_cli_rewrite_bind '<keyseq>'" >&2
+    return 1
+  fi
+  bindkey "$keyseq" codex-cli-rewrite
+}

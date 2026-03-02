@@ -4,7 +4,7 @@ Rewrite natural language on your shell command line into an executable CLI comma
 
 Example:
 - You type: `list all files older than a week`
-- Press your shortcut (for example `Ctrl-I`)
+- Press your shortcut (for example `Alt-r`)
 - The line is rewritten to a command such as: `find . -type f -mtime +7`
 
 ## Requirements
@@ -23,17 +23,23 @@ This plugin uses your existing Codex login flow (no API keys).
 git clone <YOUR_REPO_URL> "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/codex-cli-rewrite"
 ```
 
-2. In `~/.zshrc`, configure the key (optional) and enable the plugin:
+2. In `~/.zshrc`, enable the plugin and bind a key explicitly:
 
 ```zsh
-# Optional (default is ^I; note this overrides Tab completion if used)
-export CODEX_CLI_REWRITE_KEY='^I'
-
 # Optional model override
 # export CODEX_CLI_REWRITE_MODEL='gpt-5'
 
 plugins+=(codex-cli-rewrite)
+
+# Bind after plugin init (example: Alt-r)
+bindkey '^[r' codex-cli-rewrite
+# or: codex_cli_rewrite_bind '^[r'
+
+# Example: Ctrl-\
+# bindkey '^\\' codex-cli-rewrite
 ```
+
+Note: the plugin does not auto-bind any key by default.
 
 3. Reload shell:
 
