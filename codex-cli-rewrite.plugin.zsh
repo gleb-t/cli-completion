@@ -1,12 +1,15 @@
 # oh-my-zsh plugin: codex-cli-rewrite
 # Rewrites natural-language shell intent in the current command buffer
-# into a concrete shell command via `codex exec`.
-# Spinner/widget flow adapted from:
+# into a concrete shell command via an OpenAI-compatible chat completions API
+# (LiteLLM by default). Spinner/widget flow adapted from:
 # https://github.com/loiccoyle/zsh-github-copilot
 
 typeset -g CODEX_CLI_REWRITE_RESULT_FILE
 
-: "${CODEX_CLI_REWRITE_MODEL:=}"
+: "${CODEX_CLI_REWRITE_MODEL:=anthropic/claude-haiku-5-5}"
+# Optional reasoning_effort (minimal|low|medium|high). Empty = not sent.
+: "${CODEX_CLI_REWRITE_EFFORT:=}"
+# API URL/token are resolved at call time; they default to HARBOR_LITELLM_URL/TOKEN.
 : "${CODEX_CLI_REWRITE_RESULT_FILE:=/tmp/zsh_codex_cli_rewrite_result}"
 
 _codex_cli_rewrite_trim() {
@@ -20,43 +23,29 @@ _codex_cli_rewrite_generate() {
   setopt pipefail
 
   local user_input="$1"
-  local prompt tmp_out tmp_err response command
-  local -a model_args
+  local api_url="${CODEX_CLI_REWRITE_API_URL:-${HARBOR_LITELLM_URL%/}/v1}"
+  local api_token="${CODEX_CLI_REWRITE_API_TOKEN:-$HARBOR_LITELLM_TOKEN}"
+  local system_prompt body response command
 
-  tmp_out="$(mktemp "${TMPDIR:-/tmp}/codex-cli-rewrite.out.XXXXXX")" || return 1
-  tmp_err="$(mktemp "${TMPDIR:-/tmp}/codex-cli-rewrite.err.XXXXXX")" || {
-    rm -f -- "$tmp_out"
-    return 1
-  }
+  [[ -n "$api_token" && "$api_url" != "/v1" ]] || return 1
 
-  prompt=$(cat <<PROMPT
-Convert the following natural language shell request into exactly one executable shell command.
-Return only the command text, with no markdown, no backticks, no explanation, and no surrounding quotes.
-If the input already appears to be a shell command, return a cleaned-up equivalent command.
+  system_prompt="Translate the user's request into exactly one ${SHELL:t} command for macOS. \
+Output only the command: no markdown, no backticks, no explanation, no surrounding quotes. \
+If the input is already a command, return a cleaned-up equivalent."
 
-Request:
-${user_input}
-PROMPT
-)
+  body="$(jq -n \
+    --arg model "$CODEX_CLI_REWRITE_MODEL" \
+    --arg effort "$CODEX_CLI_REWRITE_EFFORT" \
+    --arg sys "$system_prompt" \
+    --arg user "$user_input" \
+    '{model: $model, max_tokens: 500,
+      messages: [{role: "system", content: $sys}, {role: "user", content: $user}]}
+     + (if $effort != "" then {reasoning_effort: $effort} else {} end)')" || return 1
 
-  model_args=()
-  if [[ -n "$CODEX_CLI_REWRITE_MODEL" ]]; then
-    model_args=(--model "$CODEX_CLI_REWRITE_MODEL")
-  fi
-
-  if ! print -r -- "$prompt" | codex exec \
-    --skip-git-repo-check \
-    --sandbox read-only \
-    --color never \
-    "${model_args[@]}" \
-    -o "$tmp_out" \
-    - >"$tmp_err" 2>&1; then
-    rm -f -- "$tmp_out" "$tmp_err"
-    return 1
-  fi
-
-  response="$(<"$tmp_out")"
-  rm -f -- "$tmp_out" "$tmp_err"
+  response="$(print -r -- "$body" | curl -sS --fail -m 30 "$api_url/chat/completions" \
+    -H "Authorization: Bearer $api_token" \
+    -H "Content-Type: application/json" \
+    --data-binary @- 2>/dev/null | jq -r '.choices[0].message.content // empty')" || return 1
 
   response="${response//$'\r'/}"
   response="${response//\`\`\`/}"
@@ -116,15 +105,15 @@ codex_cli_rewrite_widget() {
   [ -z "$BUFFER" ] && return
   zle end-of-line
 
-  if ! command -v codex >/dev/null 2>&1; then
-    _prompt_msg "codex-cli-rewrite: 'codex' command not found"
+  if ! command -v jq >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
+    _prompt_msg "codex-cli-rewrite: needs 'curl' and 'jq'"
     return 1
   fi
 
   local result
   result="$(_codex_cli_rewrite_spinner "$BUFFER")"
 
-  [ -z "$result" ] && _prompt_msg "codex-cli-rewrite: rewrite failed (run 'codex login')" && return
+  [ -z "$result" ] && _prompt_msg "codex-cli-rewrite: rewrite failed (check HARBOR_LITELLM_URL/TOKEN)" && return
 
   zle reset-prompt
   BUFFER="$result"

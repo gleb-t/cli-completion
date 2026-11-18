@@ -11,9 +11,10 @@ Example:
 
 - `zsh`
 - [oh-my-zsh](https://ohmyz.sh)
-- [`codex` CLI](https://github.com/openai/codex) installed and logged in (`codex login`)
+- `curl` and `jq`
+- An OpenAI-compatible chat completions endpoint (LiteLLM by default) and a token
 
-This plugin uses your existing Codex login flow (no API keys).
+The plugin sends one chat completions request per rewrite (about 1s with a small model).
 
 ## Install
 
@@ -26,8 +27,14 @@ git clone <YOUR_REPO_URL> "${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/codex-
 2. In `~/.zshrc`, enable the plugin and bind a key explicitly:
 
 ```zsh
-# Optional model override
-# export CODEX_CLI_REWRITE_MODEL='gpt-5'
+# API endpoint and token (defaults: $HARBOR_LITELLM_URL/v1 and $HARBOR_LITELLM_TOKEN)
+# export CODEX_CLI_REWRITE_API_URL='https://<litellm-host>/v1'
+# export CODEX_CLI_REWRITE_API_TOKEN='<token>'
+
+# Optional model override (default: anthropic/claude-haiku-5-5)
+# export CODEX_CLI_REWRITE_MODEL='anthropic/claude-haiku-5-5'
+# Optional reasoning_effort, sent only when set
+# export CODEX_CLI_REWRITE_EFFORT='low'
 
 plugins+=(codex-cli-rewrite)
 
@@ -51,7 +58,7 @@ exec zsh
 
 1. Type a natural-language request in the prompt.
 2. Press your configured shortcut.
-3. The current line is replaced with Codex's generated shell command.
+3. The current line is replaced with the generated shell command.
 4. Press Enter to run it.
 
 ## Update
@@ -63,9 +70,5 @@ git pull --ff-only
 
 ## Notes
 
-- The rewrite runs `codex exec` with `--sandbox read-only`.
-- If rewrite fails, check authentication with:
-
-```bash
-codex login
-```
+- The rewrite is a plain chat completions call: no agent, no tools, nothing is executed.
+- If the rewrite fails, check that the API URL and token are set and valid.
